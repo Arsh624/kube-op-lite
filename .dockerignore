@@ -1,0 +1,8 @@
+# Ignore build and git artifacts when building the container image.
+bin/
+.git/
+*.md
+charts/
+config/
+docs/
+.github/

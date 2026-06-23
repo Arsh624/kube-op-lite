@@ -1,0 +1,141 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.15.0
+  name: gpuworkloads.gpu.kube-op-lite.io
+spec:
+  group: gpu.kube-op-lite.io
+  names:
+    kind: GpuWorkload
+    listKind: GpuWorkloadList
+    plural: gpuworkloads
+    shortNames:
+    - gw
+    singular: gpuworkload
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    additionalPrinterColumns:
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .spec.replicas
+      name: Desired
+      type: integer
+    - jsonPath: .status.availableReplicas
+      name: Available
+      type: integer
+    - jsonPath: .spec.gpuCount
+      name: GPUs
+      type: integer
+    - jsonPath: .spec.image
+      name: Image
+      priority: 1
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    schema:
+      openAPIV3Schema:
+        description: GpuWorkload is the Schema for the gpuworkloads API.
+        type: object
+        properties:
+          apiVersion:
+            type: string
+          kind:
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: 'GpuWorkloadSpec is the desired state: what the user asks for.'
+            type: object
+            required:
+            - image
+            - replicas
+            properties:
+              replicas:
+                description: Replicas is the desired number of pods.
+                type: integer
+                format: int32
+                minimum: 1
+                default: 1
+              image:
+                description: Image is the container image to run.
+                type: string
+                minLength: 1
+              gpuCount:
+                description: |-
+                  GpuCount is a simulated GPU request. It is surfaced on the pods as a label
+                  and annotation rather than a real device request, so it runs on any cluster.
+                type: integer
+                format: int32
+                minimum: 0
+                maximum: 8
+                default: 0
+              priority:
+                description: Priority drives a scheduling annotation on the pods.
+                type: string
+                enum:
+                - low
+                - medium
+                - high
+                default: medium
+          status:
+            description: 'GpuWorkloadStatus is the observed state: what the controller reports back.'
+            type: object
+            properties:
+              phase:
+                description: Phase is the current lifecycle state.
+                type: string
+              availableReplicas:
+                description: AvailableReplicas is the number of ready pods observed on the child Deployment.
+                type: integer
+                format: int32
+              lastReconcileTime:
+                description: LastReconcileTime is when the controller last reconciled this object.
+                type: string
+                format: date-time
+              conditions:
+                description: Conditions represent the latest available observations of the object's state.
+                type: array
+                items:
+                  type: object
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  properties:
+                    lastTransitionTime:
+                      type: string
+                      format: date-time
+                    message:
+                      type: string
+                      maxLength: 32768
+                    observedGeneration:
+                      type: integer
+                      format: int64
+                      minimum: 0
+                    reason:
+                      type: string
+                      maxLength: 1024
+                      minLength: 1
+                    status:
+                      type: string
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                    type:
+                      type: string
+                      maxLength: 316
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+    served: true
+    storage: true
+    subresources:
+      status: {}

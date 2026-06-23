@@ -1,0 +1,33 @@
+# Default values for kube-op-lite.
+
+image:
+  repository: kube-op-lite
+  tag: dev
+  pullPolicy: IfNotPresent
+
+# Number of operator (manager) replicas. Leader election keeps one active.
+replicaCount: 1
+
+# Enable leader election (recommended if replicaCount > 1).
+leaderElection: false
+
+# Admission webhooks require TLS certs (typically via cert-manager). Disabled by
+# default so a basic `helm install` works out of the box. See README to enable.
+webhook:
+  enabled: false
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 128Mi
+  requests:
+    cpu: 10m
+    memory: 64Mi
+
+serviceAccount:
+  create: true
+  name: ""
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

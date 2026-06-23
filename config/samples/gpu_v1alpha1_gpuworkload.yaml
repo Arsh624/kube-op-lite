@@ -1,0 +1,9 @@
+apiVersion: gpu.kube-op-lite.io/v1alpha1
+kind: GpuWorkload
+metadata:
+  name: gpuworkload-sample
+spec:
+  replicas: 3
+  image: nginx:1.27
+  gpuCount: 2
+  priority: high

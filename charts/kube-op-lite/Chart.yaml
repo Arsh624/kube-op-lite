@@ -1,0 +1,17 @@
+apiVersion: v2
+name: kube-op-lite
+description: A lightweight Kubernetes operator that manages GpuWorkload custom resources.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+- operator
+- gpu
+- controller
+- kubebuilder
+home: https://github.com/Arsh624/kube-op-lite
+sources:
+- https://github.com/Arsh624/kube-op-lite
+maintainers:
+- name: Arsh624
+  url: https://github.com/Arsh624

@@ -1,0 +1,11 @@
+{
+  "name": "kube-op-lite",
+  "image": "mcr.microsoft.com/devcontainers/go:1-1.22-bookworm",
+  "features": {
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {},
+    "ghcr.io/devcontainers/features/kubectl-helm-minikube:1": { "minikube": "none" }
+  },
+  "hostRequirements": { "cpus": 4, "memory": "8gb" },
+  "postCreateCommand": "go install sigs.k8s.io/kind@v0.23.0 && go mod tidy",
+  "postAttachCommand": "echo 'Run: make demo  then  make preemption-demo'"
+}

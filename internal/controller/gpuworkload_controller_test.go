@@ -7,6 +7,8 @@ import (
 	. "github.com/onsi/gomega"
 
 	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
+	schedulingv1 "k8s.io/api/scheduling/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -33,6 +35,15 @@ var _ = Describe("GpuWorkload controller", func() {
 	AfterEach(func() {
 		wl := &gpuv1alpha1.GpuWorkload{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace}}
 		_ = k8sClient.Delete(ctx, wl)
+		// envtest runs no manager or garbage collector: drive the finalizer
+		// ourselves and remove the children so the next spec starts clean.
+		Eventually(func() bool {
+			r := &GpuWorkloadReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}
+			_, _ = r.Reconcile(ctx, ctrlRequest(key))
+			return apierrors.IsNotFound(k8sClient.Get(ctx, key, &gpuv1alpha1.GpuWorkload{}))
+		}, timeout, interval).Should(BeTrue())
+		_ = k8sClient.Delete(ctx, &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace}})
+		_ = k8sClient.Delete(ctx, &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace}})
 	})
 
 	It("creates a child Deployment owned by the GpuWorkload", func() {
@@ -112,6 +123,66 @@ var _ = Describe("GpuWorkload controller", func() {
 			}
 			return got.Status.Phase
 		}, timeout, interval).ShouldNot(BeEmpty())
+	})
+
+	It("requests real GPUs and a priority class the scheduler can preempt with", func() {
+		wl := &gpuv1alpha1.GpuWorkload{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
+			Spec:       gpuv1alpha1.GpuWorkloadSpec{Replicas: 1, Image: "nginx:1.27", GpuCount: 4, Priority: gpuv1alpha1.PriorityHigh},
+		}
+		Expect(k8sClient.Create(ctx, wl)).To(Succeed())
+		reconcileOnce()
+
+		dep := &appsv1.Deployment{}
+		Expect(k8sClient.Get(ctx, key, dep)).To(Succeed())
+		limit := dep.Spec.Template.Spec.Containers[0].Resources.Limits[gpuResource]
+		Expect(limit.Value()).To(Equal(int64(4)))
+		Expect(dep.Spec.Template.Spec.PriorityClassName).To(Equal("kube-op-lite-high"))
+
+		pc := &schedulingv1.PriorityClass{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "kube-op-lite-high"}, pc)).To(Succeed())
+		Expect(pc.Value).To(Equal(int32(100000)))
+	})
+
+	It("drains to zero replicas, then reports Terminated and releases the object", func() {
+		wl := &gpuv1alpha1.GpuWorkload{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
+			Spec:       gpuv1alpha1.GpuWorkloadSpec{Replicas: 2, Image: "nginx:1.27", Priority: gpuv1alpha1.PriorityLow},
+		}
+		Expect(k8sClient.Create(ctx, wl)).To(Succeed())
+		reconcileOnce()
+
+		By("deleting: the finalizer holds the object while the Deployment scales to zero")
+		Expect(k8sClient.Delete(ctx, wl)).To(Succeed())
+		reconcileOnce()
+		dep := &appsv1.Deployment{}
+		Expect(k8sClient.Get(ctx, key, dep)).To(Succeed())
+		Expect(*dep.Spec.Replicas).To(Equal(int32(0)))
+		got := &gpuv1alpha1.GpuWorkload{}
+		Expect(k8sClient.Get(ctx, key, got)).To(Succeed())
+		Expect(got.Status.Phase).To(Equal(gpuv1alpha1.PhaseDraining))
+
+		By("once no pods remain, the finalizer is removed")
+		reconcileOnce()
+		Eventually(func() bool {
+			return apierrors.IsNotFound(k8sClient.Get(ctx, key, &gpuv1alpha1.GpuWorkload{}))
+		}, timeout, interval).Should(BeTrue())
+	})
+
+	It("does not rewrite status when nothing changed", func() {
+		wl := &gpuv1alpha1.GpuWorkload{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
+			Spec:       gpuv1alpha1.GpuWorkloadSpec{Replicas: 1, Image: "nginx:1.27", Priority: gpuv1alpha1.PriorityMedium},
+		}
+		Expect(k8sClient.Create(ctx, wl)).To(Succeed())
+		reconcileOnce()
+		before := &gpuv1alpha1.GpuWorkload{}
+		Expect(k8sClient.Get(ctx, key, before)).To(Succeed())
+
+		reconcileOnce()
+		after := &gpuv1alpha1.GpuWorkload{}
+		Expect(k8sClient.Get(ctx, key, after)).To(Succeed())
+		Expect(after.ResourceVersion).To(Equal(before.ResourceVersion))
 	})
 
 	It("rejects an unknown object lookup cleanly", func() {

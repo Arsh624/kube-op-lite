@@ -9,6 +9,15 @@ It mirrors the patterns NVIDIA's GPU Operator uses — CRDs, controllers,
 reconciliation loops, owner-reference lifecycle automation — in a self-contained,
 locally-runnable form.
 
+GPU requests are **real scheduler resources**: pods ask for `nvidia.com/gpu`, Kind nodes
+advertise fake GPU capacity, and `priority` maps to PriorityClasses, so the stock
+kube-scheduler bin-packs GPUs and **preempts** low-priority work when they run out.
+No GPU hardware needed.
+
+[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/Arsh624/kube-op-lite)
+&nbsp;Opens a 4-core cloud dev box with Go, Docker, Kind, kubectl and Helm. Then run
+`make demo && make preemption-demo`.
+
 > Built with [Kubebuilder](https://book.kubebuilder.io/) / controller-runtime,
 > packaged with Helm, and validated on a local [Kind](https://kind.sigs.k8s.io/) cluster.
 
@@ -58,8 +67,8 @@ metadata:
 spec:
   replicas: 3          # desired pod count        (min 1)
   image: nginx:1.27    # container image
-  gpuCount: 2          # simulated GPU request     (0–8, surfaced as pod label/annotation)
-  priority: high       # low | medium | high       (drives a scheduling annotation)
+  gpuCount: 2          # nvidia.com/gpu per pod    (0–8)
+  priority: high       # low | medium | high       (PriorityClass, enables preemption)
 ```
 
 | Field | Type | Rules |
@@ -70,7 +79,40 @@ spec:
 | `spec.priority`  | enum | `low` / `medium` / `high`, defaults to `medium` |
 
 **Status** reports `phase` (`Pending → Provisioning → Running → Draining → Terminated`),
-`availableReplicas`, `conditions[]`, and `lastReconcileTime`.
+`availableReplicas`, `conditions[]` (`Available`, `GpuUnschedulable`), and `lastReconcileTime`.
+When pods can't be placed, `GpuUnschedulable=True` carries the scheduler's reason,
+e.g. `0/1 nodes are available: 1 Insufficient nvidia.com/gpu`.
+
+---
+
+## GPU scheduling and preemption
+
+| Priority | PriorityClass | Value |
+|----------|---------------|-------|
+| `low`    | `kube-op-lite-low`    | 1000 |
+| `medium` | `kube-op-lite-medium` | 10000 |
+| `high`   | `kube-op-lite-high`   | 100000 |
+
+The controller creates these PriorityClasses on demand. `make kind-gpus` patches each
+Kind node's status with `nvidia.com/gpu: 4`, the same extended resource the NVIDIA
+device plugin registers, so the scheduler does the real accounting.
+
+`make preemption-demo` on a 1-node, 4-GPU cluster:
+
+1. `training-low` (2 pods x 2 GPUs, low) fills the node and goes `Running`.
+2. `inference-high` (1 pod x 2 GPUs, high) arrives. No GPUs are free, so the scheduler
+   evicts a low-priority pod and `inference-high` goes `Running`.
+3. `training-low` drops to `Pending` with `GpuUnschedulable=True` until GPUs free up.
+
+## Metrics
+
+Exposed on the manager's `/metrics` endpoint alongside controller-runtime's built-ins:
+
+| Metric | Type | Meaning |
+|--------|------|---------|
+| `kube_op_lite_gpus_allocated{namespace,name,priority}` | gauge | GPUs held by available pods |
+| `kube_op_lite_time_to_running_seconds` | histogram | creation → first `Running` |
+| `kube_op_lite_unschedulable_total{priority}` | counter | transitions into `GpuUnschedulable` |
 
 ---
 
@@ -180,10 +222,12 @@ kubectl delete gpuworkload gpuworkload-sample
 
 - **Provision** — creating a `GpuWorkload` spins up a matching Deployment + Service.
 - **Upgrade** — changing `spec.image` triggers a rolling update of the child Deployment.
-- **Drain / Terminate** — a finalizer reports a `Draining` phase, then owner-reference
-  garbage collection removes the children before the object is finalized.
-- **Status reporting** — the controller writes back `phase`, `availableReplicas`, and an
-  `Available` condition every reconcile, requeueing until actual state matches desired.
+- **Drain / Terminate** — on delete, a finalizer scales the Deployment to zero and holds the
+  object in `Draining` until every pod has exited, reports `Terminated`, then releases it so
+  owner-reference garbage collection removes the children.
+- **Status reporting** — the controller writes back `phase`, `availableReplicas`, and
+  conditions **only when they change**, and ignores its own status-only updates
+  (`GenerationChangedPredicate`), so it never wakes itself up in a loop.
 
 ---
 
@@ -213,6 +257,8 @@ helm upgrade --install kube-op-lite charts/kube-op-lite \
 | Reconciliation loops and admission webhooks (GPU-operator patterns) | `gpuworkload_controller.go`, `gpuworkload_webhook.go` |
 | Packaged via Helm charts for repeatable deployment | `charts/kube-op-lite/` |
 | Cluster lifecycle automation (provision, drain, upgrade) | reconcile + finalizer |
+| GPU-aware scheduling with priority preemption | `gpuResources`, `ensurePriorityClass`, `make preemption-demo` |
+| Operator observability (Prometheus metrics) | `internal/controller/metrics.go` |
 | Validated on a local Kind/Minikube cluster | `make demo` |
 
 ---

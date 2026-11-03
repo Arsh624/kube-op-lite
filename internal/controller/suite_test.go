@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -63,5 +64,9 @@ var _ = BeforeSuite(func() {
 var _ = AfterSuite(func() {
 	cancel()
 	By("tearing down the test environment")
-	Expect(testEnv.Stop()).To(Succeed())
+	err := testEnv.Stop()
+	// On Windows envtest cannot signal etcd/kube-apiserver to stop; ignore that.
+	if runtime.GOOS != "windows" {
+		Expect(err).NotTo(HaveOccurred())
+	}
 })

@@ -81,7 +81,8 @@ helm-install: ## Install/upgrade the operator via the Helm chart.
 	helm upgrade --install $(RELEASE) charts/kube-op-lite \
 		--namespace $(NAMESPACE) --create-namespace \
 		--set image.repository=$(word 1,$(subst :, ,$(IMG))) \
-		--set image.tag=$(word 2,$(subst :, ,$(IMG)))
+		--set image.tag=$(word 2,$(subst :, ,$(IMG))) \
+		--wait --timeout 3m
 
 .PHONY: helm-uninstall
 helm-uninstall: ## Uninstall the operator.
@@ -91,6 +92,19 @@ helm-uninstall: ## Uninstall the operator.
 sample: ## Apply the example GpuWorkload.
 	kubectl apply -f config/samples/gpu_v1alpha1_gpuworkload.yaml
 
+.PHONY: kind-gpus
+kind-gpus: ## Advertise fake nvidia.com/gpu capacity on Kind nodes (GPUS=4 per node).
+	bash hack/kind-fake-gpus.sh $(or $(GPUS),4)
+
+.PHONY: cert-manager
+cert-manager: ## Install cert-manager (issues the webhook TLS cert).
+	kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.15.3/cert-manager.yaml
+	kubectl wait --for=condition=Available deployment --all -n cert-manager --timeout=180s
+
 .PHONY: demo
-demo: kind-create kind-load helm-install sample ## One-shot: cluster + operator + sample.
+demo: kind-create kind-gpus cert-manager kind-load helm-install sample ## One-shot: cluster + fake GPUs + operator + sample.
 	@echo ">> Watch it converge:  kubectl get gpuworkloads -w"
+
+.PHONY: preemption-demo
+preemption-demo: ## Show a high-priority workload preempting a low-priority one for GPUs.
+	bash hack/preemption-demo.sh

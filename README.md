@@ -263,6 +263,33 @@ helm upgrade --install kube-op-lite charts/kube-op-lite \
 
 ---
 
+## How I built this (AI-assisted)
+
+I used [Claude Code](https://claude.com/claude-code) as a pair programmer for this
+project, the way I'd use any strong tool: I decide what gets built, it speeds up the typing.
+
+**What I owned**
+- The idea and the architecture: a Kubebuilder operator modeled on NVIDIA GPU Operator
+  patterns (CRD, reconcile loop, webhooks, finalizer-based lifecycle, Helm, Kind).
+- Scope and trade-off calls: real `nvidia.com/gpu` scheduling with fake node capacity
+  instead of a label, PriorityClass-based preemption, and a Codespaces demo instead
+  of a fake web mock, since an operator can't run on a static host.
+- Reviewing every change, deciding what ships, and keeping the claims in this README
+  honest (e.g. GPUs are advertised capacity, not real devices).
+
+**What Claude Code helped with**
+- Boilerplate, test scaffolding, and the first draft of new controller code.
+- Code review that surfaced real bugs, which I then had fixed and covered by tests:
+  a self-triggered reconcile loop from status writes, a drain that never actually
+  scaled down, and envtest specs leaking finalized objects between runs.
+- Running the build and test loop until `go vet` and all envtest specs passed.
+
+How I worked with it: break the work into small, checkable steps, ask for options with
+trade-offs before any code, demand evidence (passing tests, not "should work"), and
+reject anything I couldn't explain myself.
+
+---
+
 ## License
 
 Apache 2.0 — see [LICENSE](LICENSE).
